@@ -1,0 +1,123 @@
+# ================================
+# 📚 Kindle Review Sentiment Analysis
+# ================================
+
+# 1. Import Libraries
+import pandas as pd
+import re
+import nltk
+from nltk.corpus import stopwords
+from bs4 import BeautifulSoup
+from nltk.stem import WordNetLemmatizer
+
+from sklearn.model_selection import train_test_split
+from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
+from sklearn.naive_bayes import GaussianNB
+from sklearn.metrics import confusion_matrix, accuracy_score
+
+# Download required NLTK data
+nltk.download('stopwords')
+nltk.download('wordnet')
+
+# ================================
+# 2. Load Dataset
+# ================================
+data = pd.read_csv('Kindle Reviews/all_kindle_review.csv')
+
+# Select required columns
+df = data[['reviewText', 'rating']].copy()
+
+# ================================
+# 3. Preprocessing
+# ================================
+
+# Convert rating → binary (0 = negative, 1 = positive)
+df['rating'] = df['rating'].apply(lambda x: 0 if x < 3 else 1)
+
+# Lowercase
+df['reviewText'] = df['reviewText'].str.lower()
+
+# Remove special characters
+df['reviewText'] = df['reviewText'].apply(
+    lambda x: re.sub('[^a-zA-Z0-9 ]+', '', str(x))
+)
+
+# Remove stopwords
+stop_words = set(stopwords.words('english'))
+df['reviewText'] = df['reviewText'].apply(
+    lambda x: " ".join([word for word in x.split() if word not in stop_words])
+)
+
+# Remove URLs
+df['reviewText'] = df['reviewText'].apply(
+    lambda x: re.sub(r'http\S+|www\S+|https\S+', '', x)
+)
+
+# Remove HTML tags
+df['reviewText'] = df['reviewText'].apply(
+    lambda x: BeautifulSoup(x, "lxml").get_text()
+)
+
+# Remove extra spaces
+df['reviewText'] = df['reviewText'].apply(
+    lambda x: " ".join(x.split())
+)
+
+# Lemmatization
+lemmatizer = WordNetLemmatizer()
+
+def lemmatize_words(text):
+    return " ".join([lemmatizer.lemmatize(word) for word in text.split()])
+
+df['reviewText'] = df['reviewText'].apply(lemmatize_words)
+
+# ================================
+# 4. Train-Test Split
+# ================================
+X_train, X_test, y_train, y_test = train_test_split(
+    df['reviewText'],
+    df['rating'],
+    test_size=0.2,
+    random_state=42
+)
+
+# ================================
+# 5. Feature Extraction
+# ================================
+
+# Bag of Words
+bow = CountVectorizer()
+X_train_bow = bow.fit_transform(X_train).toarray()
+X_test_bow = bow.transform(X_test).toarray()
+
+# TF-IDF
+tfidf = TfidfVectorizer()
+X_train_tfidf = tfidf.fit_transform(X_train).toarray()
+X_test_tfidf = tfidf.transform(X_test).toarray()
+
+# ================================
+# 6. Model Training
+# ================================
+
+# Train models
+nb_model_bow = GaussianNB().fit(X_train_bow, y_train)
+nb_model_tfidf = GaussianNB().fit(X_train_tfidf, y_train)
+
+# ================================
+# 7. Predictions
+# ================================
+
+y_pred_bow = nb_model_bow.predict(X_test_bow)
+y_pred_tfidf = nb_model_tfidf.predict(X_test_tfidf)
+
+# ================================
+# 8. Evaluation
+# ================================
+
+print("===== BOW RESULTS =====")
+print("Accuracy:", accuracy_score(y_test, y_pred_bow))
+print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred_bow))
+
+print("\n===== TF-IDF RESULTS =====")
+print("Accuracy:", accuracy_score(y_test, y_pred_tfidf))
+print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred_tfidf))
