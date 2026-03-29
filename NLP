@@ -1,123 +1,113 @@
-# ================================
-# 📚 Kindle Review Sentiment Analysis
-# ================================
-
-# 1. Import Libraries
+# ==============================
+# 1. IMPORT LIBRARIES
+# ==============================
 import pandas as pd
+import numpy as np
 import re
 import nltk
-from nltk.corpus import stopwords
+
 from bs4 import BeautifulSoup
+from nltk.corpus import stopwords
 from nltk.stem import WordNetLemmatizer
 
 from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import CountVectorizer, TfidfVectorizer
-from sklearn.naive_bayes import GaussianNB
-from sklearn.metrics import confusion_matrix, accuracy_score
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
+
+import pickle
 
 # Download required NLTK data
 nltk.download('stopwords')
 nltk.download('wordnet')
 
-# ================================
-# 2. Load Dataset
-# ================================
-data = pd.read_csv('Kindle Reviews/all_kindle_review.csv')
+# ==============================
+# 2. LOAD DATA
+# ==============================
+df = pd.read_csv('all_kindle_review (1).csv')
 
-# Select required columns
-df = data[['reviewText', 'rating']].copy()
+# Keep only required columns
+df = df[['reviewText', 'rating']]
 
-# ================================
-# 3. Preprocessing
-# ================================
-
-# Convert rating → binary (0 = negative, 1 = positive)
+# ==============================
+# 3. TARGET TRANSFORMATION
+# ==============================
+# Convert rating into binary sentiment
 df['rating'] = df['rating'].apply(lambda x: 0 if x < 3 else 1)
 
-# Lowercase
-df['reviewText'] = df['reviewText'].str.lower()
-
-# Remove special characters
-df['reviewText'] = df['reviewText'].apply(
-    lambda x: re.sub('[^a-zA-Z0-9 ]+', '', str(x))
-)
-
-# Remove stopwords
+# ==============================
+# 4. TEXT CLEANING
+# ==============================
 stop_words = set(stopwords.words('english'))
-df['reviewText'] = df['reviewText'].apply(
-    lambda x: " ".join([word for word in x.split() if word not in stop_words])
-)
-
-# Remove URLs
-df['reviewText'] = df['reviewText'].apply(
-    lambda x: re.sub(r'http\S+|www\S+|https\S+', '', x)
-)
-
-# Remove HTML tags
-df['reviewText'] = df['reviewText'].apply(
-    lambda x: BeautifulSoup(x, "lxml").get_text()
-)
-
-# Remove extra spaces
-df['reviewText'] = df['reviewText'].apply(
-    lambda x: " ".join(x.split())
-)
-
-# Lemmatization
 lemmatizer = WordNetLemmatizer()
 
-def lemmatize_words(text):
-    return " ".join([lemmatizer.lemmatize(word) for word in text.split()])
+def clean_text(text):
+    text = str(text).lower()
+    
+    # Remove HTML tags
+    text = BeautifulSoup(text, "lxml").get_text()
+    
+    # Remove URLs
+    text = re.sub(r'http\S+|www\S+|https\S+', '', text)
+    
+    # Keep only alphabets
+    text = re.sub(r'[^a-zA-Z]', ' ', text)
+    
+    # Remove stopwords + lemmatize
+    words = []
+    for word in text.split():
+        if word not in stop_words:
+            words.append(lemmatizer.lemmatize(word))
+    
+    return " ".join(words)
 
-df['reviewText'] = df['reviewText'].apply(lemmatize_words)
+# Apply cleaning
+df['reviewText'] = df['reviewText'].apply(clean_text)
 
-# ================================
-# 4. Train-Test Split
-# ================================
+# ==============================
+# 5. TRAIN TEST SPLIT
+# ==============================
+X = df['reviewText']
+y = df['rating']
+
 X_train, X_test, y_train, y_test = train_test_split(
-    df['reviewText'],
-    df['rating'],
-    test_size=0.2,
-    random_state=42
+    X, y, test_size=0.2, random_state=42
 )
 
-# ================================
-# 5. Feature Extraction
-# ================================
+# ==============================
+# 6. TF-IDF VECTORIZATION
+# ==============================
+tfidf = TfidfVectorizer(
+    max_features=5000,
+    ngram_range=(1,2),
+    stop_words='english'
+)
 
-# Bag of Words
-bow = CountVectorizer()
-X_train_bow = bow.fit_transform(X_train).toarray()
-X_test_bow = bow.transform(X_test).toarray()
+X_train_tfidf = tfidf.fit_transform(X_train)
+X_test_tfidf = tfidf.transform(X_test)
 
-# TF-IDF
-tfidf = TfidfVectorizer()
-X_train_tfidf = tfidf.fit_transform(X_train).toarray()
-X_test_tfidf = tfidf.transform(X_test).toarray()
+# ==============================
+# 7. MODEL TRAINING
+# ==============================
+model = LogisticRegression(max_iter=1000, class_weight='balanced')
+model.fit(X_train_tfidf, y_train)
 
-# ================================
-# 6. Model Training
-# ================================
+# ==============================
+# 8. PREDICTION
+# ==============================
+y_pred = model.predict(X_test_tfidf)
 
-# Train models
-nb_model_bow = GaussianNB().fit(X_train_bow, y_train)
-nb_model_tfidf = GaussianNB().fit(X_train_tfidf, y_train)
+# ==============================
+# 9. EVALUATION
+# ==============================
+print("Accuracy:", accuracy_score(y_test, y_pred))
+print("\nClassification Report:\n", classification_report(y_test, y_pred))
+print("\nConfusion Matrix:\n", confusion_matrix(y_test, y_pred))
 
-# ================================
-# 7. Predictions
-# ================================
+# ==============================
+# 10. SAVE MODEL
+# ==============================
+pickle.dump(model, open('sentiment_model.pkl', 'wb'))
+pickle.dump(tfidf, open('tfidf_vectorizer.pkl', 'wb'))
 
-y_pred_bow = nb_model_bow.predict(X_test_bow)
-y_pred_tfidf = nb_model_tfidf.predict(X_test_tfidf)
-
-# ================================
-# 8. Evaluation
-# ================================
-
-print("===== BOW RESULTS =====")
-print("Accuracy:", accuracy_score(y_test, y_pred_bow))
-print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred_bow))
-
-print("\n===== TF-IDF RESULTS =====")
-print("Accuracy:", accuracy_score(y_test, y_pred_tfidf))
-print("Confusion Matrix:\n", confusion_matrix(y_test, y_pred_tfidf))
+print("\n✅ Model and vectorizer saved successfully!")
